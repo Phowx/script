@@ -3,7 +3,7 @@
 #!author=Codex
 #!homepage=https://www.nodeseek.com
 #!icon=https://www.nodeseek.com/favicon.ico
-#!arguments=脚本地址:https://raw.githubusercontent.com/Phowx/nodeseek-surge/main/scripts/nodeseek/nodeseek.js,签到cron设置:10 9 * * *
+#!arguments=脚本地址:https://raw.githubusercontent.com/Phowx/script/main/scripts/nodeseek/nodeseek.js,签到cron设置:10 9 * * *
 #!arguments-desc=脚本地址可替换为发布后的 raw JS 地址；nodeseek_random=true 时领取随机鸡腿，默认 false 为固定领取。
 
 [Script]
