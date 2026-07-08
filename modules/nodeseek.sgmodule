@@ -1,0 +1,14 @@
+#!name=NodeSeek 每日签到
+#!desc=NodeSeek 每日签到领取鸡腿。先打开 www.nodeseek.com 抓取 Cookie，再由 cron 自动签到。
+#!author=Codex
+#!homepage=https://www.nodeseek.com
+#!icon=https://www.nodeseek.com/favicon.ico
+#!arguments=脚本地址:https://raw.githubusercontent.com/Phowx/nodeseek-surge/main/scripts/nodeseek/nodeseek.js,签到cron设置:10 9 * * *
+#!arguments-desc=脚本地址可替换为发布后的 raw JS 地址；nodeseek_random=true 时领取随机鸡腿，默认 false 为固定领取。
+
+[Script]
+NodeSeek 抓包 = type=http-request, pattern=^https://www\.nodeseek\.com/.*$, requires-body=0, max-size=0, script-path={{{脚本地址}}}, timeout=10
+NodeSeek 签到 = type=cron, cronexp={{{签到cron设置}}}, script-path={{{脚本地址}}}, timeout=60
+
+[MITM]
+hostname = %APPEND% www.nodeseek.com
