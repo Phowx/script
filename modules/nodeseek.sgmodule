@@ -3,12 +3,12 @@
 #!author=Codex
 #!homepage=https://www.nodeseek.com
 #!icon=https://www.nodeseek.com/favicon.ico
-#!arguments=脚本地址:https://raw.githubusercontent.com/Phowx/script/main/scripts/nodeseek/nodeseek.js,签到cron设置:10 9 * * *
-#!arguments-desc=脚本地址可替换为发布后的 raw JS 地址；nodeseek_random=true 时领取随机鸡腿，默认 false 为固定领取。
+#!arguments=SCRIPT_URL=https%3A%2F%2Fraw.githubusercontent.com%2FPhowx%2Fscript%2Fmain%2Fscripts%2Fnodeseek%2Fnodeseek.js&CRON=10%209%20*%20*%20*&RANDOM=true
+#!arguments-desc=RANDOM 设置为 true 使用随机签到，false 使用固定签到。
 
 [Script]
-NodeSeek 抓包 = type=http-request, pattern=^https://www\.nodeseek\.com/.*$, requires-body=0, max-size=0, script-path={{{脚本地址}}}, timeout=10
-NodeSeek 签到 = type=cron, cronexp={{{签到cron设置}}}, script-path={{{脚本地址}}}, timeout=60
+NodeSeek 抓包 = type=http-request, pattern=^https://www\.nodeseek\.com/.*$, requires-body=0, max-size=0, script-path=%SCRIPT_URL%, timeout=10
+NodeSeek 签到 = type=cron, cronexp="%CRON%", script-path=%SCRIPT_URL%, argument=%RANDOM%, timeout=60
 
 [MITM]
 hostname = %APPEND% www.nodeseek.com

@@ -6,8 +6,8 @@
  *   cookie and User-Agent in persistent storage.
  *
  * Cron mode:
- *   POST https://www.nodeseek.com/api/attendance?random=false by default.
- *   Set nodeseek_random=true for random reward mode.
+ *   POST https://www.nodeseek.com/api/attendance using the Surge script
+ *   argument when provided. Otherwise, nodeseek_random is used as fallback.
  *
  * Optional relay fallback:
  *   Set nodeseek_relay_url and nodeseek_relay_key to call your own relay
@@ -17,7 +17,7 @@
 
 const $ = new Env("NodeSeek");
 
-const VERSION = "2026.07.08";
+const VERSION = "2026.07.13";
 const CK_KEY = "nodeseek_cookie";
 const UA_KEY = "nodeseek_ua";
 const RANDOM_KEY = "nodeseek_random";
@@ -78,7 +78,8 @@ async function attend() {
   }
 
   const ua = $.getdata(UA_KEY) || UA_FALLBACK;
-  const random = readBool(RANDOM_KEY, false) ? "true" : "false";
+  const randomArgument = typeof $argument !== "undefined" ? $argument : "";
+  const random = readBoolValue(randomArgument, readBool(RANDOM_KEY, false)) ? "true" : "false";
   const relayUrl = normalizeRelayUrl($.getdata(RELAY_URL_KEY) || "");
   const relayKey = $.getdata(RELAY_KEY_KEY) || "";
   const debug = readBool(DEBUG_KEY, false);
@@ -255,7 +256,10 @@ function normalizeRelayUrl(raw) {
 }
 
 function readBool(key, fallback) {
-  const value = $.getdata(key);
+  return readBoolValue($.getdata(key), fallback);
+}
+
+function readBoolValue(value, fallback) {
   if (value == null || value === "") return fallback;
   return /^(1|true|yes|on)$/i.test(String(value).trim());
 }
