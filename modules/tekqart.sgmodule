@@ -1,0 +1,14 @@
+#!name=Tekqart 每日打卡
+#!desc=登录品技后打开“天天打卡”页面抓取 Cookie，再由 cron 自动打卡。
+#!author=Codex
+#!homepage=https://www.tekqart.com/plugin.php?id=zqlj_sign
+#!icon=https://www.tekqart.com/favicon.ico
+#!arguments=SCRIPT_URL=https%3A%2F%2Fraw.githubusercontent.com%2FPhowx%2Fscript%2Fmain%2Fscripts%2Ftekqart%2Ftekqart.js&CRON=20%209%20*%20*%20*&DEBUG=false
+#!arguments-desc=DEBUG 设置为 true 时输出脱敏调试日志。
+
+[Script]
+Tekqart Cookie = type=http-request, pattern=^https://www\.tekqart\.com/plugin\.php\?id=zqlj_sign(?:&.*)?$, requires-body=0, max-size=0, script-path=%SCRIPT_URL%, timeout=10
+Tekqart 打卡 = type=cron, cronexp="%CRON%", script-path=%SCRIPT_URL%, argument=%DEBUG%, timeout=60
+
+[MITM]
+hostname = %APPEND% www.tekqart.com
