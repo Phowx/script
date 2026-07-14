@@ -52,26 +52,97 @@ function captureCookie() {
 }
 
 async function attend() {
-  const cookie = $.getdata(COOKIE_KEY) || "";
-  if (!cookie) return;
+  const hasDebugArgument = typeof $argument !== "undefined" && String($argument).trim() !== "";
+  const debug = hasDebugArgument
+    ? readBoolValue($argument, false)
+    : readBoolValue($.getdata(DEBUG_KEY), false);
+  if (hasDebugArgument) $.setdata(debug ? "true" : "false", DEBUG_KEY);
 
-  const ua = $.getdata(UA_KEY) || UA_FALLBACK;
-  const missionResult = await request(MISSION_URL, makeHeaders(cookie, ua, MISSION_URL));
-  const mission = parseMissionPage(missionResult.body, missionResult.status);
-  if (mission.state === "claimed") {
-    const balance = await fetchBalanceDetail(cookie, ua);
-    $.msg("V2EX", "今日已签到", formatDetail(mission.days, balance));
+  const cookie = $.getdata(COOKIE_KEY) || "";
+  if (!cookie) {
+    $.msg("V2EX", "缺少 Cookie", "请登录后打开个人页或每日任务页触发抓取。");
     return;
   }
-  if (mission.state !== "ready") return;
 
-  await request(mission.redeemUrl, makeHeaders(cookie, ua, MISSION_URL));
-  const confirmResult = await request(MISSION_URL, makeHeaders(cookie, ua, MISSION_URL));
-  const confirmed = parseMissionPage(confirmResult.body, confirmResult.status);
-  if (confirmed.state !== "claimed") return;
+  const ua = $.getdata(UA_KEY) || UA_FALLBACK;
+  let attemptedRedeem = false;
+  let lastFailure = "unconfirmed";
+  let sawBlocked = false;
+  let sawNetworkError = false;
 
-  const balance = await fetchBalanceDetail(cookie, ua);
-  $.msg("V2EX", "签到成功", formatDetail(confirmed.days, balance));
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    $.log(`[INFO] Attendance attempt ${attempt + 1}/3`);
+    const missionResult = await request(MISSION_URL, makeHeaders(cookie, ua, MISSION_URL));
+    debugResponse("mission", missionResult, debug);
+    if (isBlocked(missionResult)) {
+      lastFailure = "blocked";
+      sawBlocked = true;
+      continue;
+    }
+    if (missionResult.error) {
+      lastFailure = "network";
+      sawNetworkError = true;
+      continue;
+    }
+    const mission = parseMissionPage(missionResult.body, missionResult.status);
+    if (mission.state === "invalid") {
+      $.msg("V2EX", "Cookie 失效", "请重新登录并打开个人页或每日任务页抓取 Cookie。");
+      return;
+    }
+    if (mission.state === "claimed") {
+      const balance = await fetchBalanceDetail(cookie, ua, debug);
+      $.msg("V2EX", attemptedRedeem ? "签到成功" : "今日已签到", formatDetail(mission.days, balance));
+      return;
+    }
+    if (mission.state !== "ready") {
+      lastFailure = "unconfirmed";
+      continue;
+    }
+
+    attemptedRedeem = true;
+    const redeemResult = await request(mission.redeemUrl, makeHeaders(cookie, ua, MISSION_URL));
+    debugResponse("redeem", redeemResult, debug);
+    if (isBlocked(redeemResult)) {
+      lastFailure = "blocked";
+      sawBlocked = true;
+    } else if (redeemResult.error) {
+      lastFailure = "network";
+      sawNetworkError = true;
+    }
+    const confirmResult = await request(MISSION_URL, makeHeaders(cookie, ua, MISSION_URL));
+    debugResponse("confirm", confirmResult, debug);
+    if (isBlocked(confirmResult)) {
+      lastFailure = "blocked";
+      sawBlocked = true;
+      continue;
+    }
+    if (confirmResult.error) {
+      lastFailure = "network";
+      sawNetworkError = true;
+      continue;
+    }
+    const confirmed = parseMissionPage(confirmResult.body, confirmResult.status);
+    if (confirmed.state === "invalid") {
+      $.msg("V2EX", "Cookie 失效", "请重新登录并打开个人页或每日任务页抓取 Cookie。");
+      return;
+    }
+    if (confirmed.state !== "claimed") {
+      lastFailure = "unconfirmed";
+      continue;
+    }
+
+    const balance = await fetchBalanceDetail(cookie, ua, debug);
+    $.msg("V2EX", "签到成功", formatDetail(confirmed.days, balance));
+    return;
+  }
+
+  if (sawBlocked || lastFailure === "blocked") {
+    $.msg("V2EX", "访问受限", "连续三次收到访问限制或挑战页面，请稍后重试。");
+  } else if (sawNetworkError || lastFailure === "network") {
+    $.msg("V2EX", "请求失败", "连续三次请求失败，请检查网络连接后重试。");
+  } else {
+    $.msg("V2EX", "签到未确认", "三次尝试后，每日任务页仍未确认奖励已领取。");
+  }
 }
 
 function parseMissionPage(html, status) {
@@ -94,8 +165,18 @@ function parseMissionPage(html, status) {
   return { state: "unknown", days };
 }
 
-async function fetchBalanceDetail(cookie, ua) {
+function isBlocked(result) {
+  const status = Number(result && result.status || 0);
+  const body = String(result && result.body || "");
+  return status === 403
+    || status === 429
+    || status === 503
+    || /Just a moment|cf-chl-|challenge-platform|访问过于频繁|请求过于频繁/i.test(body);
+}
+
+async function fetchBalanceDetail(cookie, ua, debug) {
   const result = await request(BALANCE_URL, makeHeaders(cookie, ua, MISSION_URL));
+  debugResponse("balance", result, debug);
   if (result.error || (result.status && (result.status < 200 || result.status >= 400))) return {};
   return parseBalancePage(result.body, localDateKey());
 }
@@ -133,6 +214,25 @@ function formatDetail(days, balance) {
 function localDateKey(date = new Date()) {
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+}
+
+function debugResponse(label, result, enabled) {
+  if (!enabled) return;
+  const body = String(result && result.body || "");
+  $.log(`[DEBUG] ${label} status=${result && result.status || "unknown"} bytes=${body.length}`);
+  if (body) $.log(`[DEBUG] ${label} body=${redactSensitive(body).slice(0, 800)}`);
+}
+
+function redactSensitive(value) {
+  return String(value || "")
+    .replace(/(\bA2=)[^;\s"'<>]+/gi, "$1[REDACTED]")
+    .replace(/([?&](?:amp;)?once=)\d+/gi, "$1[REDACTED]")
+    .replace(/(\bonce\s*=\s*["']?)\d+/gi, "$1[REDACTED]");
+}
+
+function readBoolValue(value, fallback) {
+  if (value == null || value === "") return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value).trim());
 }
 
 function makeHeaders(cookie, ua, referer) {

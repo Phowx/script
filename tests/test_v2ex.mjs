@@ -81,6 +81,13 @@ function notification(result, subtitle) {
   return result.notifications.find((item) => item.subtitle === subtitle);
 }
 
+function redeemOnceValues(calls) {
+  return calls
+    .map((call) => String(call.url).match(/\/redeem\?once=(\d+)/))
+    .filter(Boolean)
+    .map((match) => match[1]);
+}
+
 function missionClaimed({ days = 1262 } = {}) {
   return `<html><h1>每日登录奖励已领取</h1><p>已连续登录 ${days} 天</p></html>`;
 }
@@ -133,6 +140,13 @@ test("capture mode refreshes stored values without duplicate notification", asyn
   assert.equal(result.calls.length, 0);
 });
 
+test("cron mode reports a missing Cookie before making requests", async () => {
+  const result = await runSurge();
+
+  assert.ok(notification(result, "缺少 Cookie"));
+  assert.equal(result.calls.length, 0);
+});
+
 test("an already-claimed mission does not redeem again", async () => {
   const result = await runSurge({
     store: { v2ex_cookie: "A2=COOKIE_SECRET", v2ex_ua: "Surge Test UA" },
@@ -154,7 +168,7 @@ test("a redemption is successful only after the mission page confirms it", async
       { body: missionReady({ once: "11111", days: 1261 }) },
       { status: 302, headers: { Location: MISSION_URL }, body: "" },
       { body: missionClaimed({ days: 1262 }) },
-      { body: balancePage({ reward: 5 }) },
+      { body: balancePage({ reward: "5.0" }) },
     ],
   });
 
@@ -170,6 +184,135 @@ test("a redemption is successful only after the mission page confirms it", async
   assert.match(notice.body, /连续 1262 天/);
   assert.match(notice.body, /奖励 5 铜币/);
   assert.match(notice.body, /余额 3 金币, 56 铜币/);
+});
+
+test("missing optional detail fields do not downgrade a confirmed success", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+    responses: [
+      { body: missionReady({ once: "11111", days: "" }) },
+      { status: 302, body: "" },
+      { body: missionClaimed({ days: "" }) },
+      { body: "<html><div>余额结构暂不可识别</div></html>" },
+    ],
+  });
+
+  const notice = notification(result, "签到成功");
+  assert.ok(notice);
+  assert.equal(notice.body, "站点已确认今日奖励已领取。");
+});
+
+test("an unconfirmed redemption never becomes success and retries with fresh once values", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET", v2ex_ua: "Surge Test UA" },
+    responses: [
+      { body: missionReady({ once: "11111" }) },
+      { body: "<div>请重新点击一次以领取每日登录奖励</div>" },
+      { body: missionReady({ once: "11111" }) },
+      { body: missionReady({ once: "22222" }) },
+      { body: "<div>操作未确认</div>" },
+      { body: missionReady({ once: "22222" }) },
+      { body: missionReady({ once: "33333" }) },
+      { body: "<div>操作未确认</div>" },
+      { body: missionReady({ once: "33333" }) },
+      { body: balancePage({ reward: 5 }) },
+    ],
+  });
+
+  assert.equal(notification(result, "签到成功"), undefined);
+  assert.ok(notification(result, "签到未确认"));
+  assert.deepEqual(redeemOnceValues(result.calls), ["11111", "22222", "33333"]);
+  assert.equal(result.calls.some((call) => call.url === BALANCE_URL), false);
+  assert.equal(result.remainingResponses.length, 1);
+});
+
+test("a login-required mission page reports an invalid Cookie", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+    responses: [{ body: "<html>你要查看的页面需要先登录</html>" }],
+  });
+
+  assert.ok(notification(result, "Cookie 失效"));
+  assert.equal(result.calls.length, 1);
+  assert.equal(result.calls.some((call) => /\/redeem\?/.test(call.url)), false);
+});
+
+test("HTTP 401 reports an invalid Cookie", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+    responses: [{ status: 401, body: "" }],
+  });
+
+  assert.ok(notification(result, "Cookie 失效"));
+  assert.equal(result.calls.length, 1);
+});
+
+for (const status of [403, 429, 503]) {
+  test(`HTTP ${status} retries and then reports access restricted`, async () => {
+    const result = await runSurge({
+      store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+      responses: Array.from({ length: 3 }, () => ({ status, body: "<html>Access denied</html>" })),
+    });
+
+    assert.ok(notification(result, "访问受限"));
+    assert.equal(result.calls.length, 3);
+  });
+}
+
+test("a challenge page retries and then reports access restricted", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+    responses: Array.from({ length: 3 }, () => ({ body: "<title>Just a moment...</title><div id=\"cf-chl-widget\"></div>" })),
+  });
+
+  assert.ok(notification(result, "访问受限"));
+  assert.equal(result.calls.length, 3);
+});
+
+test("blocked redemption responses remain classified as access restricted", async () => {
+  const responses = [];
+  for (const once of ["11111", "22222", "33333"]) {
+    responses.push(
+      { body: missionReady({ once }) },
+      { status: 403, body: "<html>Access denied</html>" },
+      { body: missionReady({ once }) },
+    );
+  }
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+    responses,
+  });
+
+  assert.ok(notification(result, "访问受限"));
+  assert.equal(notification(result, "签到未确认"), undefined);
+});
+
+test("three network errors report a request failure", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET" },
+    responses: Array.from({ length: 3 }, () => ({ error: "The request timed out" })),
+  });
+
+  assert.ok(notification(result, "请求失败"));
+  assert.equal(result.calls.length, 3);
+});
+
+test("debug output redacts Cookie and once values", async () => {
+  const result = await runSurge({
+    store: { v2ex_cookie: "A2=COOKIE_SECRET", v2ex_ua: "Surge Test UA" },
+    argument: "true",
+    responses: [
+      { body: missionReady({ once: "11111" }) + "<div>A2=COOKIE_SECRET</div>" },
+      { body: "<a href=\"/mission/daily/redeem?once=11111\">继续</a>" },
+      { body: missionClaimed({ days: 1262 }) + "<p>once=22222</p>" },
+      { body: balancePage({ reward: 5 }) },
+    ],
+  });
+
+  const output = result.logs.join("\n");
+  assert.equal(result.values.get("v2ex_debug"), "true");
+  assert.match(output, /\[REDACTED\]/);
+  assert.doesNotMatch(output, /COOKIE_SECRET|11111|22222/);
 });
 
 export async function runTests() {
