@@ -1,0 +1,14 @@
+#!name=V2EX 每日签到
+#!desc=登录 V2EX 后打开个人页或每日任务页抓取 Cookie，再由 cron 自动领取每日登录奖励。
+#!author=Codex
+#!homepage=https://www.v2ex.com/mission/daily
+#!icon=https://www.v2ex.com/favicon.ico
+#!arguments=SCRIPT_URL=https%3A%2F%2Fraw.githubusercontent.com%2FPhowx%2Fscript%2Fmain%2Fscripts%2Fv2ex%2Fv2ex.js&CRON=0%209%20*%20*%20*&DEBUG=false
+#!arguments-desc=DEBUG 设置为 true 时输出脱敏调试日志。
+
+[Script]
+V2EX Cookie = type=http-request, pattern=^https://www\.v2ex\.com/(?:member/[^/?#]+|mission/daily)(?:[/?#].*)?$, requires-body=0, max-size=0, script-path=%SCRIPT_URL%, timeout=10
+V2EX 签到 = type=cron, cronexp="%CRON%", script-path=%SCRIPT_URL%, argument=%DEBUG%, timeout=90
+
+[MITM]
+hostname = %APPEND% www.v2ex.com

@@ -4,6 +4,8 @@ import vm from "node:vm";
 
 const SCRIPT_URL = new URL("../scripts/v2ex/v2ex.js", import.meta.url);
 const SCRIPT_SOURCE = await readFile(SCRIPT_URL, "utf8").catch(() => "");
+const MODULE_URL = new URL("../modules/v2ex.sgmodule", import.meta.url);
+const MODULE_SOURCE = await readFile(MODULE_URL, "utf8").catch(() => "");
 const MISSION_URL = "https://www.v2ex.com/mission/daily";
 const BALANCE_URL = "https://www.v2ex.com/balance";
 
@@ -313,6 +315,21 @@ test("debug output redacts Cookie and once values", async () => {
   assert.equal(result.values.get("v2ex_debug"), "true");
   assert.match(output, /\[REDACTED\]/);
   assert.doesNotMatch(output, /COOKIE_SECRET|11111|22222/);
+});
+
+test("the Surge module exposes the expected arguments and restricted capture pattern", () => {
+  assert.notEqual(MODULE_SOURCE, "", "V2EX Surge module must exist");
+  assert.match(
+    MODULE_SOURCE,
+    /SCRIPT_URL=https%3A%2F%2Fraw\.githubusercontent\.com%2FPhowx%2Fscript%2Fmain%2Fscripts%2Fv2ex%2Fv2ex\.js/,
+  );
+  assert.match(MODULE_SOURCE, /CRON=0%209%20\*%20\*%20\*/);
+  assert.match(MODULE_SOURCE, /DEBUG=false/);
+  assert.ok(MODULE_SOURCE.includes(
+    "pattern=^https://www\\.v2ex\\.com/(?:member/[^/?#]+|mission/daily)(?:[/?#].*)?$",
+  ));
+  assert.match(MODULE_SOURCE, /type=cron[^\r\n]+argument=%DEBUG%[^\r\n]+timeout=90/);
+  assert.match(MODULE_SOURCE, /hostname = %APPEND% www\.v2ex\.com/);
 });
 
 export async function runTests() {
